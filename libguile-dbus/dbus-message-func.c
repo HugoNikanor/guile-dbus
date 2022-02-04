@@ -288,6 +288,84 @@ GDBUS_DEFINE(gdbus_message_append_args, "%dbus-message-append-args", 2,
 }
 #undef FUNC_NAME
 
+#define SCM_APPEND(list, value) \
+     do { list = scm_append_x(scm_list_2(list, scm_list_1((value)))); } while (0)
+
+SCM read_response(DBusMessageIter* iter) {
+     int c_type = dbus_message_iter_get_arg_type(iter);
+     if (dbus_type_is_basic(c_type)) {
+          SCM type = dbus_type_to_scm(c_type);
+
+          DBusBasicValue c_value;
+          dbus_message_iter_get_basic(iter, &c_value);
+          SCM value = dbus_value_to_scm(c_type, c_value);
+
+          return scm_list_2(type, value);
+
+     } else if (dbus_type_is_container(c_type)) {
+          switch (c_type) {
+          case DBUS_TYPE_ARRAY: {
+               DBusMessageIter sub;
+               dbus_message_iter_recurse(iter, &sub);
+               // int subtype = dbus_message_iter_get_arg_type(&sub);
+               // if (dbus_type_is_fixed(subtype)) {
+               //   dbus_message_iter_get_fixed_array(&sub, );
+               // } else
+               SCM fields = SCM_EOL;
+               /* always all the same type */
+               while (dbus_message_iter_get_arg_type(&sub) != DBUS_TYPE_INVALID) {
+                    SCM_APPEND(fields, read_response(&sub));
+                    dbus_message_iter_next(&sub);
+               }
+               return scm_list_2(dbus_type_to_scm(c_type), fields);
+          }
+          case DBUS_TYPE_VARIANT: {
+               DBusMessageIter sub;
+               dbus_message_iter_recurse(iter, &sub);
+               return scm_list_2(dbus_type_to_scm(c_type),
+                                 read_response(&sub));
+          }
+          case DBUS_TYPE_STRUCT: {
+               DBusMessageIter sub;
+               dbus_message_iter_recurse(iter, &sub);
+               SCM fields = SCM_EOL;
+               while (dbus_message_iter_get_arg_type(&sub) != DBUS_TYPE_INVALID) {
+                    SCM_APPEND(fields, read_response(&sub));
+                    dbus_message_iter_next(&sub);
+               }
+               return scm_list_2(dbus_type_to_scm(c_type), fields);
+          }
+          case DBUS_TYPE_DICT_ENTRY: {
+               DBusMessageIter sub;
+               dbus_message_iter_recurse(iter, &sub);
+               SCM fields = SCM_EOL;
+               /* always exactly 2 arguments */
+               while (dbus_message_iter_get_arg_type(&sub) != DBUS_TYPE_INVALID) {
+                    SCM_APPEND(fields, read_response(&sub));
+                    dbus_message_iter_next(&sub);
+               }
+               return scm_list_2(dbus_type_to_scm(c_type), fields);
+          }
+          default:
+               gdbus_error("read-response",
+                           "Something went really worng with the type",
+                           SCM_EOL);
+               // return SCM_UNSPECIFIED;
+          }
+     } else {
+          gdbus_error("read-response",
+                      "Something went really worng with the type",
+                      SCM_EOL);
+          // return SCM_UNSPECIFIED;
+     }
+
+     gdbus_error("read-response",
+                 "This should be unreachable",
+                 SCM_EOL);
+     /* to suppress compiler warning */
+     return SCM_UNSPECIFIED;
+}
+
 GDBUS_DEFINE(gdbus_message_get_args, "%dbus-message-get-args", 2,
              (SCM message, SCM types),
              "")
@@ -302,21 +380,15 @@ GDBUS_DEFINE(gdbus_message_get_args, "%dbus-message-get-args", 2,
 
     if (scm_is_false(types)) {
         if (! dbus_message_iter_init(data->message, &iter)) {
-             /* Message had no arguments, return our empty list */
+            /* Message had no arguments, return our empty list */
             return result;
         }
 
+        /* Loop, since a single call can have multiple return values */
         int c_type;
         while ((c_type = dbus_message_iter_get_arg_type(&iter))
                != DBUS_TYPE_INVALID) {
-            SCM type = dbus_type_to_scm(c_type);
-            DBusBasicValue c_value;
-
-            dbus_message_iter_get_basic(&iter, &c_value);
-
-            SCM value = dbus_value_to_scm(c_type, c_value);
-            result = scm_append(scm_list_2(result, scm_list_2(type, value)));
-
+            SCM_APPEND(result, read_response(&iter));
             dbus_message_iter_next(&iter);
         }
     } else {
