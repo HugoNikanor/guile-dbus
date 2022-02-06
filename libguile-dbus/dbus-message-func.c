@@ -150,6 +150,8 @@ GDBUS_DEFINE(gdbus_messsage_new_signal, "%make-dbus-message/signal", 3,
 }
 #undef FUNC_NAME
 
+#define DBG(var) scm_simple_format(SCM_BOOL_T, scm_from_utf8_string(#var " = ~s~%"), scm_list_1((var)))
+
 /* See https://dbus.freedesktop.org/doc/api/html/group__DBusProtocol.html */
 GDBUS_DEFINE(gdbus_message_append_args, "%dbus-message-append-args", 2,
              (SCM message, SCM args),
@@ -158,125 +160,138 @@ GDBUS_DEFINE(gdbus_message_append_args, "%dbus-message-append-args", 2,
 {
     gdbus_message_t* data = gdbus_message_from_scm(message);
     DBusMessageIter iter;
-    int list_size;
     SCM param;
-    int idx;
 
     SCM_ASSERT(scm_to_bool(scm_list_p(args)), args, SCM_ARG2, FUNC_NAME);
 
     dbus_message_iter_init_append(data->message, &iter);
 
-    list_size = scm_to_int32(scm_length(args));
-    for (idx = 0; idx < list_size; ++idx) {
-        param = scm_list_ref(args, scm_from_int(idx));
-        if (scm_list_p(param)) {
+    for (SCM lst = args; scm_is_true(scm_pair_p(lst)); lst = SCM_CDR(lst)) {
+        param = SCM_CAR(lst);
+        // DBG(param);
+        if (scm_is_true(scm_list_p(param))) {
             SCM scm_type  = scm_list_ref(param, scm_from_int(0));
             SCM scm_value = scm_list_ref(param, scm_from_int(1));
 
-            const symbol_mapping_t* symbol = dbus_type_from_scm(scm_type);
+            // DBG(scm_type);
+            if (scm_is_true(scm_pair_p(scm_type))) {
+                 // printf("Took the complex path\n");
+                 const symbol_mapping_t* symbol = dbus_type_from_scm(scm_car(scm_type));
+                 if (! symbol) {
+                      gdbus_error(FUNC_NAME, "Unknown type", scm_type);
+                 }
+                 switch (symbol->value) {
+                 case DBUS_TYPE_ARRAY: {
+                      SCM sub_type = scm_list_ref(scm_type, scm_from_int(1));
+                      // SCM arr  = scm_list_ref(scm_value, scm_from_int(1));
 
-            if (! symbol) {
-                gdbus_error(FUNC_NAME, "Unknown type", scm_type);
-            }
-            switch (symbol->value) {
-            case DBUS_TYPE_BOOLEAN: {
-                /* This makes any non-false value true */
-                dbus_bool_t value = scm_is_true(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_BYTE: {
-                unsigned char value = scm_to_uint8(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_INT16: {
-                dbus_int16_t value = scm_to_int16(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_INT32: {
-                dbus_int32_t value = scm_to_int32(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_UINT16: {
-                dbus_uint16_t value = scm_to_uint16(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_UINT32: {
-                dbus_uint32_t value = scm_to_uint32(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_INT64: {
-                dbus_int64_t value = scm_to_int64(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_UINT64: {
-                 dbus_uint64_t value = scm_to_uint64(scm_value);
-                 dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                 break;
-            }
-            /* Object paths and signatures technically have to be validated,
-               but are otherwise identical to strings. See
-               https://dbus.freedesktop.org/doc/dbus-specification.html#type-system */
-            case DBUS_TYPE_OBJECT_PATH:
-            case DBUS_TYPE_SIGNATURE:
-            case DBUS_TYPE_STRING: {
-                char* value = scm_to_utf8_stringn(scm_value, NULL);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_DOUBLE: {
-                /* While techincly not exactly correct, since DBUS_TYPE_DOUBLE
-                   marks an 8-byte IEEE754 double, while C doesn't have that
-                   guarantee, it will still be right in 99%+ of cases */
-                double value = scm_to_double(scm_value);
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
-            case DBUS_TYPE_UNIX_FD: {
-                /* Explicitly the system dependant int types, since
-                   file descriptors are system dependant */
-                int value = scm_to_uint(scm_fileno(scm_value));
-                dbus_message_iter_append_basic(&iter, symbol->value, &value);
-                break;
-            }
+                      int length = scm_to_int(scm_vector_length(scm_value));
+                      DBusMessageIter container_iter;
+                      dbus_bool_t ret = dbus_message_iter_open_container(
+                           &iter,
+                           DBUS_TYPE_ARRAY,
+                           scm_to_locale_string(sub_type),
+                           &container_iter);
 
-            case DBUS_TYPE_ARRAY: {
-                SCM type = scm_list_ref(scm_value, scm_from_int(0));
-                SCM arr  = scm_list_ref(scm_value, scm_from_int(1));
+                      assert(ret == TRUE);
 
-                int length = scm_to_int(scm_vector_length(arr));
-                DBusMessageIter container_iter;
-                dbus_bool_t ret = dbus_message_iter_open_container(
-                    &iter,
-                    DBUS_TYPE_ARRAY,
-                    scm_to_locale_string(type),
-                    &container_iter);
+                      for (int idx = 0; idx < length; ++idx) {
+                           SCM v = scm_vector_ref(scm_value, scm_from_int(idx));
+                           char* cv = scm_to_locale_string(v);
+                           dbus_message_iter_append_basic(
+                                &container_iter,
+                                // symbol->value,
+                                DBUS_TYPE_STRING,
+                                &cv);
+                      }
 
-                assert(ret == TRUE);
+                      dbus_message_iter_close_container(&iter, &container_iter);
+                      break;
+                 }
+                 }
+            } else {
+                 // printf("Took the simple path\n");
+                const symbol_mapping_t* symbol = dbus_type_from_scm(scm_type);
+                // printf("symbol = %p\n", symbol);
 
-                for (int idx = 0; idx < length; ++idx) {
-                    SCM v = scm_vector_ref(arr, scm_from_int(idx));
-                    char* cv = scm_to_locale_string(v);
-                    dbus_message_iter_append_basic(
-                        &container_iter,
-                        symbol->value,
-                        &cv);
+                if (! symbol) {
+                    gdbus_error(FUNC_NAME, "Unknown type", scm_type);
+                }
+                switch (symbol->value) {
+                case DBUS_TYPE_BOOLEAN: {
+                    /* This makes any non-false value true */
+                    dbus_bool_t value = scm_is_true(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_BYTE: {
+                    unsigned char value = scm_to_uint8(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_INT16: {
+                    dbus_int16_t value = scm_to_int16(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_INT32: {
+                    dbus_int32_t value = scm_to_int32(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_UINT16: {
+                    dbus_uint16_t value = scm_to_uint16(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_UINT32: {
+                    dbus_uint32_t value = scm_to_uint32(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_INT64: {
+                    dbus_int64_t value = scm_to_int64(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_UINT64: {
+                    dbus_uint64_t value = scm_to_uint64(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                /* Object paths and signatures technically have to be validated,
+                but are otherwise identical to strings. See
+                https://dbus.freedesktop.org/doc/dbus-specification.html#type-system */
+                case DBUS_TYPE_OBJECT_PATH:
+                case DBUS_TYPE_SIGNATURE:
+                case DBUS_TYPE_STRING: {
+                    char* value = scm_to_utf8_stringn(scm_value, NULL);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_DOUBLE: {
+                    /* While techincly not exactly correct, since DBUS_TYPE_DOUBLE
+                    marks an 8-byte IEEE754 double, while C doesn't have that
+                    guarantee, it will still be right in 99%+ of cases */
+                    double value = scm_to_double(scm_value);
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
+                }
+                case DBUS_TYPE_UNIX_FD: {
+                    /* Explicitly the system dependant int types, since
+                    file descriptors are system dependant */
+                    int value = scm_to_uint(scm_fileno(scm_value));
+                    dbus_message_iter_append_basic(&iter, symbol->value, &value);
+                    break;
                 }
 
-                dbus_message_iter_close_container(&iter, &container_iter);
-                break;
+                default:
+                    gdbus_error(FUNC_NAME, "Unsupported yet",
+                                scm_list_2(message, args));
+                }
             }
 
-            default:
-                gdbus_error(FUNC_NAME, "Unsupported yet",
-                            scm_list_2(message, args));
-            }
+
         }
     }
 

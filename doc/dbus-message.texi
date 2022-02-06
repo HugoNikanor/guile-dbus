@@ -1,0 +1,100 @@
+@section Arguments
+@vindex invalid
+@vindex byte
+@vindex boolean
+@vindex int16
+@vindex int32
+@vindex uint16
+@vindex uint32
+@vindex int64
+@vindex uint64
+@vindex double
+@vindex string
+@vindex object-path
+@vindex signature
+@vindex unix-fd
+@vindex array
+@vindex variant
+@vindex struct
+@vindex dict-entry
+@vindex DBUS_TYPE_INVALID
+@vindex DBUS_TYPE_BYTE
+@vindex DBUS_TYPE_BOOLEAN
+@vindex DBUS_TYPE_INT16
+@vindex DBUS_TYPE_INT32
+@vindex DBUS_TYPE_UINT16
+@vindex DBUS_TYPE_UINT32
+@vindex DBUS_TYPE_INT64
+@vindex DBUS_TYPE_UINT64
+@vindex DBUS_TYPE_DOUBLE
+@vindex DBUS_TYPE_STRING
+@vindex DBUS_TYPE_OBJECT_PATH
+@vindex DBUS_TYPE_SIGNATURE
+@vindex DBUS_TYPE_UNIX_FD
+@vindex DBUS_TYPE_ARRAY
+@vindex DBUS_TYPE_VARIANT
+@vindex DBUS_TYPE_STRUCT
+@vindex DBUS_TYPE_DICT_ENTRY
+
+@c see dbus-protocol.h
+Type code that is never equal to a legitimate type code.
+@itemize
+@item invalid
+@end itemize
+
+Primitive data types.
+@itemize
+@item byte
+@item boolean
+@item int16
+@item int32
+@item uint16
+@item uint32
+@item int64
+@item uint64
+@item double
+@item string
+@item object-path
+@item signature
+@item unix-fd
+@end itemize
+
+Compound data types.
+@itemize
+@item array
+@item variant
+@item struct
+@item dict-entry
+@end itemize
+
+@deffn {Scheme Procedure} dbus-message-append-args message args
+Append arguments @var{args} to the @var{message}.
+
+@var{args} is a list on the form @code{((type value) ...)}
+
+Currently only simple types and arrays can be added.
+
+@example
+(dbus-message-append-args
+    msg
+    (list '(string "org.freedesktop.systemd1.Timer")
+          `(string ,name)))
+@end example
+
+@example
+(dbus-message-append-args
+    msg (list '((array "s") #("Hello"))))
+@end example
+@end deffn
+
+
+@deffn {Scheme Procedure} dbus-message-get-args message [types]
+Returns a list of all out-values.
+""
+@c TODO
+
+@example
+(dbus-message-get-args
+@end example
+
+@end deffn
